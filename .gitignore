@@ -1,3 +1,18 @@
+/.idea
+
+# bulky project contents
+output*/
+datasets/
+datasets*/
+models/
+weights*/
+
+# dsac* utility & python environment
+dsacstar/*/
+opencv-3.4.2/
+opencv-build/
+venv*/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -127,3 +142,8 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+datasets/naturescape
+datasets/urbanscape
+*.png
+/datasets/
