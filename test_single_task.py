@@ -271,7 +271,8 @@ def main():
 
     """Loop over network weights"""
     for i, network_path in enumerate(network_paths):
-        print("{:s} Evaluating network #{:d} {:s}\nPath: {:s}".format('='*20, i, '='*20, network_path))
+        print("{:s} Evaluating network #{:d} / {:d} {:s}\nPath: {:s}".format('='*20, i+1, len(network_paths),
+                                                                             '='*20, network_path))
 
         # update evaluation if needed
         if opt.search_dir:
@@ -287,11 +288,11 @@ def main():
         nodata_value = get_nodata_value(scene)
 
         network_basename = os.path.basename(network_path).lower()
-        if 'decoder_coord_ENCDEC_free_depth_normal_semantics' in network_basename or 'crossloc_se' in network_basename:
+        if '-decoder_coord_free_depth_normal_semantics-senc-' in network_basename or 'crossloc_se' in network_basename:
             num_enc = 4
-        elif 'decoder_coord_ENCDEC_free_semantics' in network_basename:
+        elif '-decoder_coord_free_semantics-senc-' in network_basename:
             num_enc = 2
-        elif 'decoder_coord_ENCDEC_free_depth_normal' in network_basename or 'crossloc' in network_basename:
+        elif '-decoder_coord_free_depth_normal-senc-' in network_basename or 'crossloc' in network_basename:
             num_enc = 3
         else:
             num_enc = 0
