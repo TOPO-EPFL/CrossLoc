@@ -1,24 +1,9 @@
 #!/bin/bash
-#SBATCH --chdir /home/qyan/TransPose
-#SBATCH --nodes 1
-#SBATCH --cpus-per-task 20
-#SBATCH --ntasks 1
-#SBATCH --account topo
-#SBATCH --mem 96G
-#SBATCH --time 72:00:00
-#SBATCH --partition gpu
-#SBATCH --qos gpu
-#SBATCH --gres gpu:1
 
 LR=1e-4
 EPOCHS=1000
 SCR_TOL=50.0
 BATCH_SIZE=8
-
-# izar-specific arguments
-CKPT_DIR=/scratch/izar/$USER/ckpt-crossloc
-source /home/qyan/venvcrossloc/bin/activate
-cd /home/qyan/TransPose
 
 
 DATASET=$1
