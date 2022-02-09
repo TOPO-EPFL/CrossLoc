@@ -1,6 +1,6 @@
 # CrossLoc localization: a cross-modal visual representation learning method for absolute localization
 
-This repository contains the official implemnetation of the CrossLoc localization algorithm. 
+This repository contains the official implementation of the CrossLoc localization algorithm. 
 
 Please make sure you have access to the **CrossLoc Benchmark Raw Datasets** and have set it up properly before proceeding. 
 
