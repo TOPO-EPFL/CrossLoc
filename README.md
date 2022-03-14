@@ -8,6 +8,12 @@ Also check out other useful repos regarding the datasets:
 
 *  [**`CrossLoc-Benchmark-Datasets`**](https://github.com/TOPO-EPFL/CrossLoc-Benchmark-Datasets): CrossLoc benchmark datasets setup tutorial.
 * [**`TOPO-DataGen`**](https://github.com/TOPO-EPFL/TOPO-DataGen): an open and scalable aerial synthetic data generation workflow.
+* [**`DDLoc`**](https://github.com/TOPO-EPFL/DDLoc): our adapation of ARC method for sim2real coordinate regression
+
+Pretrained network weights and the testing set images could be found as follows:
+
+* [**`oneDrive`**](https://1drv.ms/u/s!AnkbqTET-eNqgoRsgBXkEg-PFSqudA?e=S6Pf43) 
+* [**`Google Drive`**](https://drive.google.com/drive/folders/19zIsQBeEvT69DLPbKoojOaG1_uau2VP1?usp=sharing)
 
 Happy coding! :)
 
