@@ -229,8 +229,8 @@ If you find our code useful for your research, please cite the paper:
 	author={Doytchinov, Iordan and Yan, Qi and Zheng, Jianhao and Reding, Simon and Li, Shanci}, 
 	publisher={Dryad}, 
     doi={10.5061/DRYAD.MGQNK991C}, 
-	url={http://datadryad.org/stash/dataset/doi:10.5061/dryad.mgqnk991c}
-	year={2022}, 
+	url={http://datadryad.org/stash/dataset/doi:10.5061/dryad.mgqnk991c},
+	year={2022}
 }
 ```
 
