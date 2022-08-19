@@ -1,17 +1,16 @@
 /.idea
 
 # bulky project contents
-output*/
-datasets/
-datasets*/
+output/
+datasets/*/
+datasets/*_split.txt
 models/
-weights*/
 
 # dsac* utility & python environment
 dsacstar/*/
 opencv-3.4.2/
 opencv-build/
-venv*/
+venvtranspose/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -143,7 +142,7 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-datasets/naturescape
-datasets/urbanscape
-*.png
-/datasets/
+/datasets/comballaz
+/datasets/EPFL
+/datasets/comballaz-fullsize
+/datasets/EPFL-fullsize

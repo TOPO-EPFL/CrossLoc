@@ -1,37 +1,37 @@
-# CrossLoc localization: a cross-modal visual representation learning method for absolute localization
+# TransPose: Sim2Real Transfer Learning for Camera Pose Estimation
 
-This repository contains the official implementation of the CrossLoc localization algorithm. 
+TransPose: Sim2Real **Trans**fer Learning for Camera **Pose** Estimation
 
-Please make sure you have access to the **CrossLoc Benchmark Raw Datasets** and have set it up properly before proceeding. 
+TransPose-NCE: contrastive learning of domain invariant representation
 
-Also check out other useful repos regarding the datasets:
+TransPose-MLR: mid-level representation learning for domain invariant robustness 
 
-*  [**`CrossLoc-Benchmark-Datasets`**](https://github.com/TOPO-EPFL/CrossLoc-Benchmark-Datasets): CrossLoc benchmark datasets setup tutorial.
-* [**`TOPO-DataGen`**](https://github.com/TOPO-EPFL/TOPO-DataGen): an open and scalable aerial synthetic data generation workflow.
-* [**`DDLoc`**](https://github.com/TOPO-EPFL/DDLoc): our adapation of ARC method for sim2real coordinate regression
+## Development log
 
-Pretrained network weights, the testing set images and the full datasets could be found as follows:
+Starting basis: [DSAC*](https://github.com/vislearn/dsacstar)
 
-* [**`oneDrive`**](https://1drv.ms/u/s!AnkbqTET-eNqgoRsgBXkEg-PFSqudA?e=S6Pf43)
-* [**`Google Drive`**](https://drive.google.com/drive/folders/19zIsQBeEvT69DLPbKoojOaG1_uau2VP1?usp=sharing)
-* [**`Dryad`**](https://doi.org/10.5061/dryad.mgqnk991c) (Full CrossLoc Benchmark Datasets only)
+TO-DO I:
 
-Happy coding! :)
+- [x] [BPnP](https://github.com/BoChenYS/BPnP) for efficient end-to-end learning, 
+  - [x] Not working and deprecated eventually :(
+- [x] Uncertainty learning loss as in [KFNet](https://github.com/zlthinker/KFNet) 
+  - [ ] Isotropic covariance is used & things could be improved.
+  - [ ] Sampling to get the pixel-wise error & at testing time, we could get multiple coordinate maps and poses.
+- [ ] Geometry similarity metrics
+  - [x] The idea is similar to the bilateral frustum overlap sampling as in [CamNet](http://openaccess.thecvf.com/content_ICCV_2019/html/Ding_CamNet_Coarse-to-Fine_Retrieval_for_Camera_Re-Localization_ICCV_2019_paper.html)
+  - [x] Normalized surface overlap (NSO) sampling as in [Image-box-overlap](https://github.com/nianticlabs/image-box-overlap)
+  - [x] Re-ranking of retrieved samples as in [person-re-ranking](https://openaccess.thecvf.com/content_cvpr_2017/html/Zhong_Re-Ranking_Person_Re-Identification_CVPR_2017_paper.html)
+- [ ] Implement supervised contrastive loss ([SupCon](http://arxiv.org/abs/2004.11362))
+  - [ ] To handle unbalanced dataset roll-out use prioritized experience replay as in [PER](https://openreview.net/forum?id=pBbWjZdoRiN)
 
-<p align="center">
-  <img src="assets/pull_figure.png" height="500">
-</p>
+TO-DO II:
 
-
-The CrossLoc localization algorithm is officially presented in the paper accepted to CVPR 2022
-<br>
-**CrossLoc: Scalable Aerial Localization Assisted by Multimodal Synthetic Data**
-<br>
-[Qi Yan](https://qiyan98.github.io/), [Jianhao Zheng](https://jianhao-zheng.github.io/), [Simon Reding](https://people.epfl.ch/simon.reding/?lang=en), [Shanci Li](https://people.epfl.ch/shanci.li/?lang=en), [Iordan Doytchinov](https://people.epfl.ch/iordan.doytchinov?lang=en) 
-<br>
-École Polytechnique Fédérale de Lausanne (EPFL)
-<br>
-Links: **[website](https://crossloc.github.io/) | [arXiv](https://arxiv.org/abs/2112.09081) | [code repos](https://github.com/TOPO-EPFL/CrossLoc) | [datasets](https://doi.org/10.5061/dryad.mgqnk991c)** 
+- [ ] Study some visual localization baseline algorithms
+  - [ ] Re-implement CycleGAN or CUT for translated image generation [Synthetic-to-real refinement]
+  - [ ] Re-implement AtLoc on latest dataset [Absolute pose regression]
+  - [ ] Re-implement DSAC* on latest dataset [Scene coordinate regression]
+  - [ ] Implement [hloc](https://openaccess.thecvf.com/content_CVPR_2019/html/Sarlin_From_Coarse_to_Fine_Robust_Hierarchical_Localization_at_Large_Scale_CVPR_2019_paper.html) on latest dataset [Descriptor matching]
+- [ ] Leverage mid-level representation learning
 
 ##  Get started
 
@@ -41,7 +41,7 @@ Links: **[website](https://crossloc.github.io/) | [arXiv](https://arxiv.org/abs/
 
 ```bash
 conda env create -f setup/environment.yml
-conda activate crossloc
+conda activate TransPose
 
 cd dsacstar && python3 setup_super.py --conda
 # sanity check for DSAC* plugin
@@ -53,8 +53,10 @@ Note: `import torch` must be used before `import dsacstar` in the python script.
 * Otherwise, if `conda` environment is not readily available:
 
 ```bash
-python3 -m venv venvcrossloc
-source venvcrossloc/bin/activate
+# if at Izar cluster
+module load gcc cmake python  
+python3 -m venv venvtranspose
+source venvtranspose/bin/activate
 pip3 install pip -U && pip3 install -r setup/requirements.txt
 
 wget -O opencv-3.4.2.zip https://github.com/opencv/opencv/archive/refs/tags/3.4.2.zip
@@ -73,164 +75,63 @@ python3 -c "import torch; import dsacstar; print('DSAC* installation is fine')"
 Note: 
 
 * Run `export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$(pwd)/install/lib:$(pwd)/install/lib64` or equivalent commands in shell to add opencv lib directory **EACH** time before `import dsacstar` .
-
+* If you're at Izar cluster, run `module load gcc cmake` in shell **EACH** time before `import dsacstar`. It's advised to hard-code this in your script.
 * Due to an [issue](https://github.com/pytorch/pytorch/issues/57273) in `pytorch 1.9.0` stable release, some redundant warning messages may be popped out in the terminal (`Warning: Leaking Caffe2 thread-pool after fork`). Update to nightly pytorch may solve the issue:
 
+
+    pip3 uninstall torch torchvision torchaudio
+    pip3 install pip -U
+    pip3 install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cu102/torch_nightly.html
+    ```
+
+* For `pytorch3d`, please refer to official installation [tutorial](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md). With `conda`, one could install by
+
   ```bash
-  pip3 uninstall torch torchvision torchaudio
-  pip3 install pip -U
-  pip3 install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cu102/torch_nightly.html
+  conda install -c bottler nvidiacub cudatoolkit
+  git clone https://github.com/facebookresearch/pytorch3d.git
+  cd pytorch3d && pip install -e .
   ```
-### Setup datasets
+### Download datasets
 
-See [CrossLoc Benchmark Datasets Setup](https://github.com/TOPO-EPFL/CrossLoc-Benchmark-Datasets) for details on dataset setup tutorials.
-
-## Training and testing
-
-We propose to 1) pretrain the networks using task-agnostic synthetic data only and then 2) fine-tune the models on specific downstream tasks. 
-
-To be concise, we **only show the steps for `naturescape` datasets** in the main README. Please refer to [another note](notes_crossloc_full_steps.md) detailing the other training, validation and testing steps for `urbanscape` datasets and ablation studies.
-
-### Encoders Pretraining
-
-* Training: task-agnostic `LHS-sim` synthetic data is used (at `train_sim` folder).
+* Download datasets: we adopt [DSAC*](https://github.com/vislearn/dsacstar) resources and keep their data structure.
 
 ```bash
-# specify checkpoint weight output path
-export CKPT_DIR=$(pwd)/ckpt-weights
+cd datasets
 
-# pretrain encoders with LHS-sim data for naturescape
-bash script_clean_training/encoder_pretrain.sh naturescape coord FULL 1.0 in_place 0.0 mle 0
-bash script_clean_training/encoder_pretrain.sh naturescape depth FULL 1.0 in_place 0.0 mle 0
-bash script_clean_training/encoder_pretrain.sh naturescape normal FULL 1.0 in_place 0.0 mle 0
-bash script_clean_training/encoder_pretrain.sh naturescape semantics FULL 1.0 in_place 0.0 none 0
+export DATA_DIR=/work/topo/VNAV/Synthetic_Data
+echo $DATA_DIR
+python setup_epfl.py --dataset_dir $DATA_DIR
+python setup_comballaz.py --dataset_dir $DATA_DIR
+
+# public dataset
+python setup_7scenes.py
+python setup_12scenes.py
+python setup_cambridge.py
 ```
 
-* Checkpoint selection: we evaluate the model performance on the validation set (at `val_sim` folder) and select the checkpoint models for later training tasks.
+### Training and testing
+
+==To be updated==
+
+* Training (sample command)
 
 ```bash
-# specify checkpoint weight output path
-export CKPT_DIR=$(pwd)/ckpt-weights/$TASK_DIR
-# please specify $TASK_DIR for each task, e.g., naturescape-coord-sclean_training-unc-MLE-e100-lr0.0002-sim_only-sc1.00
-# otherwise, the validation script may not load the network weight properly
-
-# select model weight based on validation set performance for naturescape
-bash script_clean_validation/validate_encoder_pretrain.sh naturescape coord FULL mle 0
-bash script_clean_validation/validate_encoder_pretrain.sh naturescape depth FULL mle 0
-bash script_clean_validation/validate_encoder_pretrain.sh naturescape normal FULL mle 0
-bash script_clean_validation/validate_encoder_pretrain.sh naturescape semantics FULL none 0
-# select the checkpoint from the generated path, see script_clean_validation/select_ckpt.py for details
+LR=0.0003
+ITER=1500000
+INITTOL=100
+python train_init.py comballaz_lhs_sim output/comballaz_lhs_sim_init.net --learningrate ${LR} --iterations ${ITER} --inittolerance ${INITTOL} --uncertainty
 ```
 
-### Encoders Fine-tuning
-
-* Training: to fine-tune the encoders with real-synthetic paired date. Note that the pretrained encoders' weights must be spcified in the script. Check the variable `ENC_PRETRAINED` in the `encoder_finetune.sh` script for detailed setup.
+* Testing (sample command)
 
 ```bash
-# specify checkpoint weight output path
-export CKPT_DIR=$(pwd)/ckpt-weights
-
-# finetune encoders with in-place sim-to-real pairs for naturescape [using 100% LHS-pretrained weights]
-bash script_clean_training/encoder_finetun.e.sh naturescape coord FULL 1.0 in_place 1.0 mle 0
-bash script_clean_training/encoder_finetune.sh naturescape depth FULL 1.0 in_place 1.0 mle 0
-bash script_clean_training/encoder_finetune.sh naturescape normal FULL 1.0 in_place 1.0 mle 0
-bash script_clean_training/encoder_finetune.sh naturescape semantics FULL 1.0 in_place 1.0 none 0
-
-# finetune encoders with out-of-place sim-to-real pairs for naturescape [using 100% LHS-pretrained weights]
-bash script_clean_training/encoder_finetune.sh naturescape coord FULL 1.0 out_of_place 1.0 mle 0
-bash script_clean_training/encoder_finetune.sh naturescape depth FULL 1.0 out_of_place 1.0 mle 0
-bash script_clean_training/encoder_finetune.sh naturescape normal FULL 1.0 out_of_place 1.0 mle 0
-bash script_clean_training/encoder_finetune.sh naturescape semantics FULL 1.0 out_of_place 1.0 none 0
+SEC=test
+python test_bpnp.py comballaz_lhs_sim output/comballaz_lhs_sim/bpnp.pth --mode 1 --sparse --section ${SEC} --search_dir --save_map
 ```
 
-* Checkpoint selection: again, we evaluate the model performance on the validation set (now at `val_drone_real` folder) and select the checkpoint models for later training tasks.
+* Visualize uncertainty map (sample command, feel free to visualize other results by changing `keywords` arguments)
 
 ```bash
-# specify checkpoint weight output path
-export CKPT_DIR=$(pwd)/ckpt-weights/$TASK_DIR
-# please specify $TASK_DIR for each task, e.g., naturescape-coord-sclean_training_pt1.00-unc-MLE-e800-lr0.0001-pairs-ip-rc1.00-finetune
-# otherwise, the validation script may not load the network weight properly
-
-# select model weight based on validation set performance naturescape data
-# please change the $TASK_DIR and repeat for in-place and out-of-place scenes
-export MIN_CKPT_ITER=1000000
-bash script_clean_validation/validate_encoder_finetune.sh naturescape coord FULL mle 0
-bash script_clean_validation/validate_encoder_finetune.sh naturescape depth FULL mle 0
-bash script_clean_validation/validate_encoder_finetune.sh naturescape normal FULL mle 0
-bash script_clean_validation/validate_encoder_finetune.sh naturescape semantics FULL none 0
-# select the checkpoint from the generated path, see script_clean_validation/select_ckpt.py for details
-```
-
-### Decoders Fine-tuning
-
-* Training: to reuse the multiple fine-tuned encoders and fine-tune the decoder with real-synthetic paired date. Note that the encoders' weights from the last step must be spcified in the script. Check the variable `ENC_COORD`, `ENC_DEPTH`, `ENC_NORMAL`  and `ENC_SEMANTICS` in the `decoder_finetune.sh` script for detailed setup.
-
-```bash
-# specify checkpoint weight output path
-export CKPT_DIR=$(pwd)/ckpt-weights
-
-# finetune decoder with in-place sim-to-real pairs for naturescape 
-# [using 100% LHS-pretrained + sim-to-real paired data fine-tuned encoders]
-bash script_clean_training/decoder_finetune.sh naturescape coord FULL 1.0 in_place 1.0 0.0 in_place 1.0 mle 0
-bash script_clean_training/decoder_finetune_plus_semantics.sh naturescape coord FULL 1.0 in_place 1.0 0.0 in_place 1.0 mle 0
-
-# finetune decoder with out-of-place sim-to-real pairs for naturescape 
-# [using 100% LHS-pretrained + sim-to-real paired data fine-tuned encoders]
-bash script_clean_training/decoder_finetune.sh naturescape coord FULL 1.0 out_of_place 1.0 0.0 out_of_place 1.0 mle 0
-bash script_clean_training/decoder_finetune_plus_semantics.sh naturescape coord FULL 1.0 out_of_place 1.0 0.0 out_of_place 1.0 mle 0
-```
-
-* Checkpoint selection: again, we evaluate the model performance on the validation set (now at `val_drone_real` folder) and select the checkpoint models for later training tasks.
-
-```bash
-# specify checkpoint weight output path
-export CKPT_DIR=$(pwd)/ckpt-weights/$TASK_DIR
-# please specify $TASK_DIR for each task, e.g., naturescape-coord-decoder_coord_free_depth_normal-senc-pt1.00-ip-ft1.00-unc-MLE-e1000-lr0.0001-pairwise-ip-rc1.00
-# otherwise, the validation script may not load the network weight properly
-
-# select model weight based on validation set performance naturescape data
-# please change the $TASK_DIR and repeat for in-place and out-of-place scenes
-export MIN_CKPT_ITER=1000000  # in-place
-export MIN_CKPT_ITER=200000   # out-of-place
-bash script_clean_validation/validate_decoder_finetune.sh naturescape coord FULL mle 0
-# select the checkpoint from the generated path, see script_clean_validation/select_ckpt.py for details
-```
-
-### Performance Testing
-
-Using the model weight selected above, we now run the testing script to evaluate the model's final performance on **testing set**.
-
-```bash
-# specify the specific weight path, change this accordingly before running each line
-export WEIGHT_PATH=YOUR_PATH
-
-# naturescape, in-place scene
-python3 test_single_task.py naturescape --task coord --uncertainty mle --section test_drone_real --network_in ${WEIGHT_PATH}
-# naturescape, out-of-place scene
-python3 test_single_task.py naturescape --task coord --uncertainty mle --section test_oop_drone_real --network_in ${WEIGHT_PATH}
-```
-
-# Citation
-
-If you find our code useful for your research, please cite the paper:
-
-````bibtex
-@article{yan2021crossloc,
-  title={CrossLoc: Scalable Aerial Localization Assisted by Multimodal Synthetic Data},
-  author={Yan, Qi and Zheng, Jianhao and Reding, Simon and Li, Shanci and Doytchinov, Iordan},
-  journal={arXiv preprint arXiv:2112.09081},
-  year={2021}
-}
-````
-
-```bibtex
-@misc{iordan2022crossloc, 
-	title={CrossLoc Benchmark Datasets}, 
-	author={Doytchinov, Iordan and Yan, Qi and Zheng, Jianhao and Reding, Simon and Li, Shanci}, 
-	publisher={Dryad}, 
-	doi={10.5061/DRYAD.MGQNK991C}, 
-	url={http://datadryad.org/stash/dataset/doi:10.5061/dryad.mgqnk991c},
-	year={2022}
-}
+python visualize.py output/comballaz_lhs_sim --search_dir --keywords uncertainty
 ```
 

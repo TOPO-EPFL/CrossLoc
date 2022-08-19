@@ -49,6 +49,12 @@ def _config_parser():
     parser.add_argument('--synthetic_only', action='store_true',
                         help='to use synthetic data only, contrastive learning is forced to be turned off')
 
+    parser.add_argument('--drone_match', action='store_true',
+                        help='to use the drone trajectory data, including synthetic and real matches')
+
+    parser.add_argument('--real_only', action='store_true',
+                        help='to use real data only, contrastive learning is forced to be turned off')
+
     parser.add_argument('--real_chunk', type=float, default=1.0,
                         help='to chunk the real data with given proportion')
 
@@ -62,14 +68,17 @@ def _config_parser():
     parser.add_argument('--tiny', '-tiny', action='store_true',
                         help='train a model with massively reduced capacity for a low memory footprint.')
 
-    parser.add_argument('--fullsize', '-fullsize', action='store_true',
-                        help='to output fillsize prediction w/o down-sampling.')
+    parser.add_argument('--depth_backbone', type=str, default=None,
+                        help='to use the pretrained depth backbone model')
+
+    parser.add_argument('--normal_backbone', type=str, default=None,
+                        help='to use the pretrained surface normal backbone model')
 
     # Optimizer
     parser.add_argument('--epochs', '-e', type=int, default=50,
                         help='number of training iterations, i.e. number of model updates')
 
-    parser.add_argument('--learningrate', '-lr', type=float, default=0.0002,
+    parser.add_argument('--learningrate', '-lr', type=float, default=0.00005,
                         help='learning rate')
 
     parser.add_argument('--no_lr_scheduling', action='store_true',
@@ -138,22 +147,24 @@ def _config_directory(opt):
     """
     Configure directory to save model (task specific).
     """
-    basename = opt.scene + '-{:s}'.format(opt.task)
+    basename = opt.scene + '-{:s}'.format(opt.task) + '-mlr'
     if opt.session != '':
         basename += '-s' + opt.session
     if opt.grayscale:
         basename += '-gray'
     if opt.uncertainty:
         basename += '-unc'
-    if opt.fullsize:
-        basename += '-fullsize'
     if opt.learningrate >= 1e-4:
         basename += '-e{:d}-lr{:.4f}'.format(opt.epochs, opt.learningrate)
     else:
         basename += '-e{:d}-lr{:.6f}'.format(opt.epochs, opt.learningrate)
     if opt.synthetic_only:
         basename += '-sim_only'
+    elif opt.real_only:
+        basename += '-real_only'
     else:
+        if opt.drone_match:
+            basename += '-drone_match'
         if opt.supercon_weight > 0:
             basename += '-supercon-w{:.2f}-t{:.2f}-pc{:d}-pi{:d}-nc{:d}-ni{:d}'.format(opt.supercon_weight,
                                                                                        opt.supercon_temperature,
@@ -163,12 +174,27 @@ def _config_directory(opt):
                                                                                        opt.sampling_neg_in_dom)
         else:
             basename += '-vanilla'
-        if opt.real_chunk < 1.0:
-            basename += '-rc{:.2f}'.format(opt.real_chunk)
+    if opt.real_chunk < 1.0 and not opt.synthetic_only:
+        basename += '-rc{:.2f}'.format(opt.real_chunk)
     if opt.translated:
         basename += '-translated'
     if opt.tiny:
         basename += '-tiny'
+
+    # load pre-trained backbone models
+    mlr_network_ls = []
+    str_mlr = ''
+    if opt.depth_backbone is not None:
+        assert os.path.isfile(opt.depth_backbone)
+        str_mlr += '_depth'
+        mlr_network_ls.append(os.path.abspath(opt.depth_backbone))
+    if opt.normal_backbone is not None:
+        assert os.path.isfile(opt.normal_backbone)
+        str_mlr += '_normal'
+        mlr_network_ls.append(os.path.abspath(opt.normal_backbone))
+    if len(str_mlr):
+        basename += '-mlr' + str_mlr
+
     if opt.network_in is not None:
         basename += '-resume'
 
@@ -219,14 +245,14 @@ def _config_directory(opt):
         else:
             os.makedirs(ckpt_output_dir)
 
-    return output_dir, ckpt_output_dir
+    return output_dir, ckpt_output_dir, mlr_network_ls
 
 
 def _config_log(opt):
     """
     Set configurations about logging to keep track of training progress.
     """
-    output_dir, ckpt_output_dir = _config_directory(opt)
+    output_dir, ckpt_output_dir, mlr_network_ls = _config_directory(opt)
 
     log_file = os.path.join(output_dir, 'output.log')
     if opt.auto_resume:
@@ -252,10 +278,11 @@ def _config_log(opt):
     logging.info('Saving model to {:s}'.format(output_dir))
     logging.info('Saving checkpoint model to {:s}'.format(ckpt_output_dir))
 
-    return output_dir, ckpt_output_dir
+    return output_dir, ckpt_output_dir, mlr_network_ls
 
 
-def _config_dataloader(scene, task, translated, grayscale, synthetic_only, real_chunk, fullsize, supercon_weight,
+def _config_dataloader(scene, task, drone_match, translated, grayscale, synthetic_only, real_only,
+                       real_chunk, supercon_weight,
                        sampling_pos_cross_dom, sampling_pos_in_dom, sampling_neg_cross_dom, sampling_neg_in_dom,
                        batch_size, nodata_value):
     """
@@ -267,13 +294,10 @@ def _config_dataloader(scene, task, translated, grayscale, synthetic_only, real_
         raise NotImplementedError
 
     # original dataset to calculate mean
-    _scene = scene + '-fullsize' if fullsize else scene
-    root_sim = "./datasets/" + _scene + "/train_sim_aug"
-    root_real = "./datasets/" + _scene + "/train_translated" if translated else "./datasets/" + _scene + "/train_real"
-    if real_chunk < 1.0:
-        root_real += '_chunk_{:.2f}'.format(real_chunk)
+    root_sim = "./datasets/" + scene + "/train_drone_sim" if drone_match else "./datasets/" + scene + "/train_sim_aug"
+    root_real = "./datasets/" + scene + "/train_translated" if translated else "./datasets/" + scene + "/train_real"
     trainset_vanilla = CamLocDataset([root_sim, root_real], coord=True, depth=True, normal=True,
-                                     augment=False, raw_image=False, mute=True, fullsize=fullsize)
+                                     augment=False, raw_image=False, mute=True, real_chunk=real_chunk)
     trainset_loader_vanilla = torch.utils.data.DataLoader(trainset_vanilla, shuffle=False, batch_size=1,
                                                           num_workers=mp.cpu_count() // 2, pin_memory=True,
                                                           collate_fn=trainset_vanilla.batch_resize)
@@ -283,18 +307,28 @@ def _config_dataloader(scene, task, translated, grayscale, synthetic_only, real_
     flag_depth = task == 'depth'
     flag_normal = task == 'normal'
 
-    if synthetic_only:
-        trainset = CamLocDataset(root_sim, coord=flag_coord, depth=flag_depth, normal=flag_normal,
-                                 augment=True, grayscale=grayscale, raw_image=False, fullsize=fullsize)
+    if synthetic_only or real_only:
+        if synthetic_only:
+            trainset = CamLocDataset(root_sim, coord=flag_coord, depth=flag_depth, normal=flag_normal,
+                                     augment=True, grayscale=grayscale, raw_image=False)
+            logging.info(
+                "Warning: this training uses synthetic data only. {:d} iterations per epoch.".format(len(trainset)))
+        else:
+            trainset = CamLocDataset(root_real, coord=flag_coord, depth=flag_depth, normal=flag_normal,
+                                     augment=True, grayscale=grayscale, raw_image=False, real_chunk=real_chunk)
+            logging.info(
+                "Warning: this training uses real data only. {:d} iterations per epoch.".format(len(trainset)))
         trainset_loader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True,
                                                       num_workers=mp.cpu_count() // 2,
                                                       pin_memory=True, collate_fn=trainset.batch_resize)
-        logging.info("Warning: this training uses synthetic data only. {:d} iterations per epoch.".format(len(trainset)))
+
     else:
         if supercon_weight > 0:
+            if drone_match:
+                raise NotImplementedError
             trainset = CamLocDatasetSupercon(root_dir_sim=root_sim, root_dir_real=root_real,
                                              coord=flag_coord, depth=flag_depth, normal=flag_normal,
-                                             augment=True, grayscale=grayscale, raw_image=False, fullsize=fullsize,
+                                             augment=True, grayscale=grayscale, raw_image=False, real_chunk=real_chunk,
                                              supercon=True,
                                              sampling_pos_cross_dom_top_n=sampling_pos_cross_dom,
                                              sampling_pos_in_dom_top_n=sampling_pos_in_dom,
@@ -303,7 +337,7 @@ def _config_dataloader(scene, task, translated, grayscale, synthetic_only, real_
             trainset_loader = get_supercon_dataloader(trainset, shuffle=False)  # no need to re-shuffle for the first epoch
         else:
             trainset = CamLocDataset([root_sim, root_real], coord=flag_coord, depth=flag_depth, normal=flag_normal,
-                                     augment=True, grayscale=grayscale, raw_image=False, fullsize=fullsize)
+                                     augment=True, grayscale=grayscale, raw_image=False, real_chunk=real_chunk)
             trainset_loader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True,
                                                           num_workers=mp.cpu_count() // 2,
                                                           pin_memory=True, collate_fn=trainset.batch_resize)
@@ -313,8 +347,8 @@ def _config_dataloader(scene, task, translated, grayscale, synthetic_only, real_
     return trainset, trainset_loader, mean
 
 
-def _config_network(scene, task, tiny, grayscale, uncertainty, fullsize,
-                    learningrate, mean, auto_resume, network_in, output_dir):
+def _config_network(scene, task, tiny, grayscale, uncertainty, learningrate, mean, auto_resume, network_in, output_dir,
+                    mlr_network_ls):
     """
     Configure network and optimizer (task specific).
     """
@@ -333,17 +367,28 @@ def _config_network(scene, task, tiny, grayscale, uncertainty, fullsize,
             num_pos_channel = 0
         network = TransPoseNet(mean, tiny, grayscale, num_task_channel=num_task_channel,
                                num_pos_channel=num_pos_channel,
-                               enc_add_res_block=2, dec_add_res_block=2, full_size_output=fullsize)
+                               enc_add_res_block=2, dec_add_res_block=2, num_mlr=len(mlr_network_ls))
     else:
         network = Network(mean, tiny)
     if network_in is not None:
-        network.load_state_dict(torch.load(network_in))
-        logging.info("Successfully loaded %s." % network_in)
-        if auto_resume:
-            model_path = os.path.join(output_dir, 'model_auto_resume.net')
-            torch.save(network.state_dict(), model_path)
+        if len(mlr_network_ls):
+            network.load_state_dict(torch.load(network_in), strict=False)
+            logging.info("Successfully loaded %s." % network_in)
+            model_path = os.path.join(output_dir, 'model.net')
+            # setup mlr modules
+            for i, mlr_network_in in enumerate(mlr_network_ls):
+                network.mlr_encoder_ls[i].load_state_dict(torch.load(mlr_network_in), strict=False)
+                for param in network.mlr_encoder_ls[i].parameters():
+                    param.requires_grad = False
+                logging.info("Successfully loaded pretrained model %s." % mlr_network_in)
         else:
-            model_path = os.path.join(output_dir, 'model_resume.net')
+            network.load_state_dict(torch.load(network_in))
+            logging.info("Successfully loaded %s." % network_in)
+            if auto_resume:
+                model_path = os.path.join(output_dir, 'model_auto_resume.net')
+                torch.save(network.state_dict(), model_path)
+            else:
+                model_path = os.path.join(output_dir, 'model_resume.net')
     else:
         model_path = os.path.join(output_dir, 'model.net')
     network = network.cuda()
@@ -362,22 +407,20 @@ def main():
     """Initialization"""
     set_random_seed(2021)
     opt = _config_parser()
-    output_dir, ckpt_output_dir = _config_log(opt)
+    output_dir, ckpt_output_dir, mlr_network_ls = _config_log(opt)
 
     nodata_value = get_nodata_value(opt.scene)
 
-    trainset, trainset_loader, mean = _config_dataloader(opt.scene, opt.task, opt.translated, opt.grayscale,
-                                                         opt.synthetic_only, opt.real_chunk, opt.fullsize,
+    trainset, trainset_loader, mean = _config_dataloader(opt.scene, opt.task, opt.drone_match, opt.translated, opt.grayscale,
+                                                         opt.synthetic_only, opt.real_only, opt.real_chunk,
                                                          opt.supercon_weight,
                                                          opt.sampling_pos_cross_dom, opt.sampling_pos_in_dom,
                                                          opt.sampling_neg_cross_dom, opt.sampling_neg_in_dom,
                                                          opt.batch_size, nodata_value)
 
     network, optimizer, model_path = _config_network(opt.scene, opt.task, opt.tiny, opt.grayscale, opt.uncertainty,
-                                                     opt.fullsize,
                                                      opt.learningrate, mean,
-                                                     opt.auto_resume, opt.network_in, output_dir)
-
+                                                     opt.auto_resume, opt.network_in, output_dir, mlr_network_ls)
     if opt.supercon_weight:
         activation = {}
 
@@ -403,10 +446,7 @@ def main():
         # scheduler would be turned OFF
         scheduler = MultiStepLR(optimizer, [opt.epochs], gamma=1.0)
     else:
-        if opt.fullsize:
-            scheduler = MultiStepLR(optimizer, [25, 50, 100], gamma=0.5)
-        else:
-            scheduler = MultiStepLR(optimizer, [50, 100], gamma=0.5)
+        scheduler = MultiStepLR(optimizer, [30, 60], gamma=0.5)
 
     pixel_grid = get_pixel_grid(network.OUTPUT_SUBSAMPLE)
 
@@ -453,9 +493,6 @@ def main():
 
             """Forward pass"""
             predictions = network(images.cuda())
-            if opt.fullsize:
-                assert predictions.size(2) == images.size(2) and predictions.size(3) == images.size(3)
-                assert predictions.size(2) == gt_labels.size(2) and predictions.size(3) == gt_labels.size(3)
             if opt.uncertainty:
                 predictions, uncertainty_map = torch.split(predictions, [network.num_task_channel, network.num_pos_channel], dim=1)  # [B, C, H, W] + [B, 1, H, W]
             else:
@@ -470,14 +507,14 @@ def main():
                                                                      pixel_grid, nodata_value, cam_mat,
                                                                      predictions, uncertainty_map, gt_poses, gt_labels,
                                                                      reduction)
-            elif opt.task == 'depth':
-                loss, valid_pred_rate = depth_regression_loss(opt.mindepth, opt.softclamp, opt.hardclamp,
-                                                              opt.uncertainty, nodata_value, predictions,
-                                                              uncertainty_map, gt_labels, reduction)
-            elif opt.task == 'normal':
-                loss, valid_pred_rate = normal_regression_loss(opt.softclamp, opt.hardclamp, opt.uncertainty,
-                                                               nodata_value, predictions, uncertainty_map,
-                                                               gt_labels, reduction)
+            # elif opt.task == 'depth':
+            #     loss, valid_pred_rate = depth_regression_loss(opt.mindepth, opt.softclamp, opt.hardclamp,
+            #                                                   opt.uncertainty, nodata_value, predictions,
+            #                                                   uncertainty_map, gt_labels, reduction)
+            # elif opt.task == 'normal':
+            #     loss, valid_pred_rate = normal_regression_loss(opt.softclamp, opt.hardclamp, opt.uncertainty,
+            #                                                    nodata_value, predictions, uncertainty_map,
+            #                                                    gt_labels, reduction)
             else:
                 raise NotImplementedError
 
@@ -487,8 +524,6 @@ def main():
 
                 # info-NCE loss
                 if 'debug' in opt.session.lower():
-                    if iteration == 0:
-                        logging.info("You are in debug mode {:s}!".format(opt.session))
                     raise NotImplementedError
                 else:
                     # Weight regression loss because of unbalanced dataset frequency

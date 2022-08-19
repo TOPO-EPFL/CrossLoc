@@ -11,7 +11,5 @@ tqdm
 gitpython
 kornia
 pyproj
-jupyterlab
 open3d==0.9.0
 visualpriors
-transforms3d

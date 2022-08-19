@@ -5,7 +5,7 @@ https://github.com/vislearn/dsacstar/blob/master/dataset.py
 Contents of changes:
 - Added grayscale option.
 - Added RGBA to RGB image conversion.
-- Added urbanscape & naturescape dataset statistics.
+- Added EPFL & comballaz dataset statistics.
 - Added mini-batch support (same scaling factor within one batch and it's reset per iteration).
 - Added the option to return original RGB image.
 - Added support for pre-computed depth & normal labels.
@@ -13,7 +13,6 @@ Contents of changes:
 - Added support for multi-folder data source.
 - Added mute option to be silent.
 - Added support for fullsize 3D label and chunked real data.
-- Added support for semantic label.
 
 Copyright (c) 2020, Heidelberg University
 Copyright (c) 2021, EPFL
@@ -59,8 +58,7 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 
 from networks.networks import Network
-from utils.io import safe_printout
-from loss.semantics import trim_semantic_label
+from utils import _safe_printout
 
 
 class CamLocDataset(Dataset):
@@ -75,7 +73,6 @@ class CamLocDataset(Dataset):
                  coord=True,
                  depth=False,
                  normal=False,
-                 semantics=False,
                  augment=False,
                  grayscale=False,
                  batch=True,
@@ -86,7 +83,7 @@ class CamLocDataset(Dataset):
                  aug_contrast=0.1,
                  aug_brightness=0.1,
                  image_height=480,
-                 real_data_chunk=None,
+                 real_chunk=None,
                  fullsize=False,
                  mute=False):
         """
@@ -101,7 +98,6 @@ class CamLocDataset(Dataset):
             coord: Return 3D GT SC. (effective iff mode == 1 && sparse == True)
             depth: Return z-buffer depth. (effective iff mode == 1 && sparse == True)
             normal: Return surface normal. (effective iff mode == 1 && sparse == True)
-            semantics: Return semantic labels. (effective iff mode == 1 && sparse == True)
             # Note: if more than one labels shall be retrieved, the output is a dictionary; see the end of __getitem__ for details
             augment: Use random data augmentation, note: not supported for mode = 2 (RGB-D) since pre-generateed eye coordinates cannot be agumented
             grayscale: Return grayscale or RGB image
@@ -113,17 +109,17 @@ class CamLocDataset(Dataset):
             aug_contrast: Max relative scale factor for image contrast sampling, e.g. 0.1 -> [0.9,1.1]
             aug_brightness: Max relative scale factor for image brightness sampling, e.g. 0.1 -> [0.9,1.1]
             image_height: RGB images are rescaled to this maximum height
-            real_data_chunk: the proportion of real images to load
+            real_chunk: the proportion of real images to load
             fullsize: to use full size 3D labels
             mute: to print out I/O-related message
         """
-        self._config_dataloader(root_dir, mode, sparse, coord, depth, normal, semantics, augment, grayscale, batch,
-                                raw_image, aug_rotation, aug_scale_min, aug_scale_max, aug_contrast, aug_brightness,
-                                image_height, real_data_chunk, fullsize, mute)
+        self._config_dataloader(root_dir, mode, sparse, coord, depth, normal, augment, grayscale, batch, raw_image,
+                                aug_rotation, aug_scale_min, aug_scale_max, aug_contrast, aug_brightness, image_height,
+                                real_chunk, fullsize, mute)
 
-    def _config_dataloader(self, root_dir, mode, sparse, coord, depth, normal, semantics, augment, grayscale, batch,
-                           raw_image, aug_rotation, aug_scale_min, aug_scale_max, aug_contrast, aug_brightness,
-                           image_height, real_data_chunk=None, fullsize=False, mute=False):
+    def _config_dataloader(self, root_dir, mode, sparse, coord, depth, normal, augment, grayscale, batch, raw_image,
+                           aug_rotation, aug_scale_min, aug_scale_max, aug_contrast, aug_brightness, image_height,
+                           real_chunk=None, fullsize=False, mute=False):
         """
         Re-usable backbone function for dataset configuration.
         """
@@ -135,18 +131,18 @@ class CamLocDataset(Dataset):
             self.coord = coord
             self.depth = depth
             self.normal = normal
-            self.semantics = semantics
-            if not np.any([coord, depth, normal, semantics]):
-                raise Exception("At least one 3D label should be enabled! Coord: {}, Depth: {}, Normal: {}".format(
-                    coord, depth, normal, semantics))
+            if not np.any([coord, depth, normal]):
+                raise Exception(
+                    "At least one 3D label should be enabled! Coord: {}, Depth: {}, Normal: {}".format(coord, depth,
+                                                                                                       normal))
         else:
             self.coord = None
             self.depth = None
             self.normal = None
-            self.semantics = None
         if not mute:
-            print("Dataloader 3D label flags: coord: {}, depth: {}, normal: {}, semantics: {}".format(
-                self.coord, self.depth, self.normal, self.semantics))
+            _safe_printout("Dataloader 3D label flags: coord: {}, depth: {}, normal: {}".format(self.coord,
+                                                                                                self.depth,
+                                                                                                self.normal))
 
         self.image_height = image_height
 
@@ -160,13 +156,13 @@ class CamLocDataset(Dataset):
         self.aug_contrast = aug_contrast
         self.aug_brightness = aug_brightness
 
-        self.real_data_chunk = real_data_chunk
+        self.real_chunk = real_chunk
         if fullsize:
             Network.OUTPUT_SUBSAMPLE = 1
         self.fullsize = fullsize
 
         if self.eye and self.augment and (self.aug_rotation > 0 or self.aug_scale_min != 1 or self.aug_scale_max != 1):
-            safe_printout("WARNING: Check your augmentation settings. Camera coordinates will not be augmented.")
+            _safe_printout("WARNING: Check your augmentation settings. Camera coordinates will not be augmented.")
 
         if self.grayscale:
             self.image_transform = transforms.Compose([
@@ -177,12 +173,12 @@ class CamLocDataset(Dataset):
                 transforms.Normalize(
                     # mean=[0.4],  # statistics calculated over 7scenes training set, should generalize fairly well
                     # std=[0.25]
-                    # urbanscape statistics (should generalize well enough)
-                    mean=[0.4308],
-                    std=[0.1724]
-                    # naturescape statistics (backup)
-                    # mean=[0.4084],
-                    # std=[0.1404]
+                    # EPFL statistics (should generalize well enough)
+                    mean=[0.4670],
+                    std=[0.1998]
+                    # comballaz statistics (backup)
+                    # mean=[0.3830],
+                    # std=[0.1148]
                 )
             ])
         else:
@@ -191,12 +187,12 @@ class CamLocDataset(Dataset):
                 transforms.Resize(self.image_height),
                 transforms.ToTensor(),
                 transforms.Normalize(
-                    # urbanscape statistics (should generalize well enough)
-                    mean=[0.4245, 0.4375, 0.3836],
-                    std=[0.1823, 0.1701, 0.1854]
-                    # naturescape statistics (backup)
-                    # mean = [0.3636, 0.4331, 0.2956],
-                    # std = [0.1383, 0.1457, 0.1147]
+                    # EPFL statistics (should generalize well enough)
+                    mean=[0.4641, 0.4781, 0.3662],
+                    std=[0.2123, 0.1976, 0.2189]
+                    # comballaz statistics (backup)
+                    # mean = [0.3311, 0.4055, 0.3130],
+                    # std = [0.1146, 0.1200, 0.0903]
                 )
             ])
 
@@ -219,8 +215,6 @@ class CamLocDataset(Dataset):
             self.depth_files = []
         if self.normal:
             self.normal_files = []
-        if self.semantics:
-            self.semantics_files = []
 
         if isinstance(root_dir, list):
             root_dir_ls = root_dir
@@ -244,7 +238,6 @@ class CamLocDataset(Dataset):
 
             depth_dir = base_dir + '/depth/'
             normal_dir = base_dir + '/normal/'
-            semantics_dir = base_dir + '/semantics/'
 
             _rgb_files = os.listdir(rgb_dir)
             _rgb_files = [rgb_dir + f for f in _rgb_files]
@@ -278,12 +271,6 @@ class CamLocDataset(Dataset):
                 _normal_files = [normal_dir + f for f in _normal_files]
                 _normal_files.sort()
                 self.normal_files.extend(_normal_files)
-
-            if self.semantics:
-                _semantics_files = os.listdir(semantics_dir)
-                _semantics_files = [semantics_dir + f for f in _semantics_files]
-                _semantics_files.sort()
-                self.semantics_files.extend(_semantics_files)
 
         if len(self.rgb_files) != len(self.pose_files):
             raise Exception('RGB file count does not match pose file count!')
@@ -324,7 +311,7 @@ class CamLocDataset(Dataset):
         pose = np.loadtxt(self.pose_files[idx])
         pose = torch.from_numpy(pose).float()
 
-        coords, depth, normal, semantics = 0, 0, 0, 0
+        coords, depth, normal = 0, 0, 0
         if self.init:
             if self.sparse:
                 if self.coord:
@@ -333,9 +320,6 @@ class CamLocDataset(Dataset):
                     depth = torch.load(self.depth_files[idx]).unsqueeze(0)  # [1, H_ds, W_ds]
                 if self.normal:
                     normal = torch.load(self.normal_files[idx])  # [3, H_ds, W_ds]
-                if self.semantics:
-                    semantics = trim_semantic_label(np.load(self.semantics_files[idx]))
-                    semantics = torch.tensor(semantics, dtype=torch.float).unsqueeze(0)  # [1, H_ds, W_ds]
             else:
                 depth = io.imread(self.coord_files[idx])
                 depth = depth.astype(np.float64)
@@ -364,12 +348,12 @@ class CamLocDataset(Dataset):
                     transforms.ColorJitter(brightness=self.aug_brightness, contrast=self.aug_contrast),
                     transforms.ToTensor(),
                     transforms.Normalize(
-                        # urbanscape statistics (should generalize well enough)
-                        mean=[0.4308],
-                        std=[0.1724]
-                        # naturescape statistics
-                        # mean=[0.4084],
-                        # std=[0.1404]
+                        # EPFL statistics (should generalize well enough)
+                        mean=[0.4670],
+                        std=[0.1998]
+                        # comballaz statistics
+                        # mean=[0.3831],
+                        # std=[0.1148]
                     )
                 ])
             else:
@@ -379,12 +363,12 @@ class CamLocDataset(Dataset):
                     transforms.ColorJitter(brightness=self.aug_brightness, contrast=self.aug_contrast),
                     transforms.ToTensor(),
                     transforms.Normalize(
-                        # urbanscape statistics (should generalize well enough)
-                        mean=[0.4245, 0.4375, 0.3836],
-                        std=[0.1823, 0.1701, 0.1854]
-                        # naturescape statistics
-                        # mean = [0.3636, 0.4331, 0.2956],
-                        # std = [0.1383, 0.1457, 0.1147]
+                        # EPFL statistics (should generalize well enough)
+                        mean=[0.4641, 0.4781, 0.3662],
+                        std=[0.2123, 0.1976, 0.2189]
+                        # comballaz statistics
+                        # mean = [0.3311, 0.4055, 0.3130],
+                        # std = [0.1146, 0.1200, 0.0903]
                     )
                 ])
             image = cur_image_transform(image)
@@ -416,11 +400,6 @@ class CamLocDataset(Dataset):
                     if self.normal:
                         normal = F.interpolate(normal.unsqueeze(0), size=(coords_h, coords_w), mode='nearest')[0]
                         normal = my_rot(normal, angle, 0)
-                    if self.semantics:
-                        # note: semantic map is always the same as image size
-                        semantics = F.interpolate(semantics.unsqueeze(0), size=(image.size(1), image.size(2)),
-                                                  mode='nearest')[0]
-                        semantics = my_rot(semantics, angle, 0).clamp(min=0)
 
                 else:
                     # rotate and scale depth maps
@@ -485,21 +464,21 @@ class CamLocDataset(Dataset):
 
             coords[:, :sc.shape[1], :sc.shape[2]] = sc
 
-        return image, pose, (coords, depth, normal, semantics), focal_length, self.rgb_files[idx]
+        return image, pose, (coords, depth, normal), focal_length, self.rgb_files[idx]
 
     def __getitem__(self, idx):
         """
         Wrapper for dataloader single datapoint retrieval.
         """
-        image, pose, (coords, depth, normal, semantics), focal_length, rgb_file = self._fetch_datapoint(idx)
+        image, pose, (coords, depth, normal), focal_length, rgb_file = self._fetch_datapoint(idx)
 
         if self.init and self.sparse:
-            flags = np.array([self.coord, self.depth, self.normal, self.semantics])
+            flags = np.array([self.coord, self.depth, self.normal])
             if np.sum(flags) == 1:
                 flag_idx = int(np.where(flags == True)[0])
-                outputs = [coords, depth, normal, semantics][flag_idx]
+                outputs = [coords, depth, normal][flag_idx]
             else:
-                outputs = {"coord": coords, "depth": depth, "normal": normal, "semantics": semantics}
+                outputs = {"coord": coords, "depth": depth, "normal": normal}
             return image, pose, outputs, focal_length, rgb_file
         else:
             return image, pose, coords, focal_length, rgb_file
@@ -538,24 +517,16 @@ class CamLocDataset(Dataset):
                 if isinstance(b_geo_labels[0], torch.Tensor):
                     # single 3d geometric label, such as coords/depth/normal
                     trim_b_geo_labels = torch.stack(b_geo_labels, dim=0)
-                    if self.semantics:
-                        trim_b_geo_labels = F.interpolate(trim_b_geo_labels, size=(image_h, image_w), mode='nearest')
-                        trim_b_geo_labels = transforms.functional.rotate(trim_b_geo_labels, angle, fill=0)
-                    else:
-                        trim_b_geo_labels = F.interpolate(trim_b_geo_labels, size=(coords_h, coords_w), mode='nearest')
-                        trim_b_geo_labels = transforms.functional.rotate(trim_b_geo_labels, angle, fill=-1)
+                    trim_b_geo_labels = F.interpolate(trim_b_geo_labels, size=(coords_h, coords_w), mode='nearest')
+                    trim_b_geo_labels = transforms.functional.rotate(trim_b_geo_labels, angle, fill=-1)
                 elif isinstance(b_geo_labels[0], dict):
                     # multiple 3d geometric labels, augment & concatenate tensors in one common dict
                     trim_b_geo_labels = {}
                     for key, value in zip(b_geo_labels[0].keys(), b_geo_labels[0].values()):
                         if isinstance(value, torch.Tensor):
                             b_data = torch.stack([item[key] for item in b_geo_labels], dim=0)
-                            if self.semantics and key == 'semantics':
-                                b_data = F.interpolate(b_data, size=(image_h, image_w), mode='nearest')
-                                b_data = transforms.functional.rotate(b_data, angle, fill=0)
-                            else:
-                                b_data = F.interpolate(b_data, size=(coords_h, coords_w), mode='nearest')
-                                b_data = transforms.functional.rotate(b_data, angle, fill=-1)
+                            b_data = F.interpolate(b_data, size=(coords_h, coords_w), mode='nearest')
+                            b_data = transforms.functional.rotate(b_data, angle, fill=-1)
                             trim_b_geo_labels[key] = b_data
                         else:
                             trim_b_geo_labels[key] = 0
@@ -569,7 +540,7 @@ class CamLocDataset(Dataset):
 
         else:
             if isinstance(b_geo_labels[0], torch.Tensor):
-                # single 3d geometric label, such as coords/depth/normal/semantics
+                # single 3d geometric label, such as coords/depth/normal
                 trim_b_geo_labels = torch.stack(b_geo_labels, dim=0)
             elif isinstance(b_geo_labels[0], dict):
                 # multiple 3d geometric labels, augment & concatenate tensors in one common dict

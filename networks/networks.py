@@ -28,16 +28,18 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
+import pdb
 import os
 import sys
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import logging
 
 PROJECT_DIR = os.path.abspath(os.path.join(__file__, '..'))
 sys.path.insert(0, PROJECT_DIR)
-from utils.io import safe_printout
+from utils import _safe_printout
 
 
 class Network(nn.Module):
@@ -148,7 +150,7 @@ def _create_res_block(tiny, num_gn_channel, ch_down_factor=1):
 
 def _create_mlr_concatenator(num_mlr, tiny, num_gn_channel):
     """Create activation concatenation block for MLR."""
-    in_channel = (512, 128)[tiny] * num_mlr
+    in_channel = (512, 128)[tiny] * (num_mlr + 1)
     out_channel = (512, 128)[tiny]
     mlr_block = nn.Sequential(nn.Conv2d(in_channel, out_channel, 3, 1, 1),
                               nn.GroupNorm(num_gn_channel, out_channel),
@@ -161,15 +163,6 @@ def _create_mlr_concatenator(num_mlr, tiny, num_gn_channel):
                               nn.ReLU()
                               )
     return mlr_block
-
-
-def _create_mlr_skip_layer(num_mlr, tiny, num_gn_channel):
-    """Create skip layer for MLR"""
-    in_channel = (512, 128)[tiny] * num_mlr
-    out_channel = (512, 128)[tiny]
-    skip_block = nn.Sequential(nn.Conv2d(in_channel, out_channel, 1, 1, 0),
-                               nn.GroupNorm(num_gn_channel, out_channel))
-    return skip_block
 
 
 class TransPoseNetEncoder(nn.Module):
@@ -256,21 +249,20 @@ class TransPoseNetEncoder(nn.Module):
         return res
 
 
-class DenseUpsamplingConvolution(nn.Module):
-    """Modified dense upsampling convolution."""
-    # Reference: https://github.com/zijundeng/pytorch-semantic-segmentation/blob/master/models/duc_hdc.py#L8
-    def __init__(self, down_sampling_rate, in_channel, num_classes, num_gn_channel=32):
-        super(DenseUpsamplingConvolution, self).__init__()
-        up_sampling_channel = (down_sampling_rate ** 2) * num_classes
-        self.conv = nn.Conv2d(in_channel, up_sampling_channel, 3, 1, 1)
-        self.norm = nn.GroupNorm(num_gn_channel, up_sampling_channel)
-        self.relu = nn.ReLU(inplace=True)
-        self.pixel_shuffle = nn.PixelShuffle(down_sampling_rate)
-
-    def forward(self, x):
-        x = self.relu(self.norm(self.conv(x)))
-        x = self.pixel_shuffle(x)
-        return x
+# class DenseUpsamplingConvolution(nn.Module):
+#     """Modified dense upsampling convolution."""
+#     # Reference: https://github.com/zijundeng/pytorch-semantic-segmentation/blob/master/models/duc_hdc.py#L8
+#     def __init__(self, down_sampling_rate, in_channel, num_gn_channel=32):
+#         super(DenseUpsamplingConvolution, self).__init__()
+#         up_sampling_channel = (down_sampling_rate ** 2) * in_channel
+#         self.conv = nn.Conv2d(in_channel, up_sampling_channel, 3, 1, 1)
+#         self.norm = nn.GroupNorm(num_gn_channel, up_sampling_channel)
+#         self.pixel_shuffle = nn.PixelShuffle(down_sampling_rate)
+#
+#     def forward(self, x):
+#         x = F.relu(self.norm(self.conv(x)))
+#         x = self.pixel_shuffle(x)
+#         return x
 
 
 class TransPoseNetDecoder(nn.Module):
@@ -301,20 +293,45 @@ class TransPoseNetDecoder(nn.Module):
         self.res3_conv3 = nn.Conv2d((512, 128)[tiny], (512, 128)[tiny], 1, 1, 0)
         self.res3_norm3 = nn.GroupNorm(num_gn_channel, (512, 128)[tiny])
 
-        self.fc1 = nn.Conv2d((512, 128)[tiny], (512, 128)[tiny], 1, 1, 0)
-        self.fc1_norm = nn.GroupNorm(min((512, 128)[tiny], num_gn_channel), (512, 128)[tiny])
-        self.fc2 = nn.Conv2d((512, 128)[tiny], (512, 128)[tiny], 1, 1, 0)
-        self.fc2_norm = nn.GroupNorm(min((512, 128)[tiny], num_gn_channel), (512, 128)[tiny])
+        # Upsampling
+        num_pre_up_channel = (512, 128)[tiny]
+        ch_down_factor = 16 if full_size_output else 1
+        num_post_up_channel = num_pre_up_channel // ch_down_factor
+        if full_size_output:
+            # Pre-upsampling residual blocks
+            self.pre_up_res_block_ls = [_create_res_block(tiny, num_gn_channel) for _ in range(dec_add_res_block)]
+            for i, block in enumerate(self.pre_up_res_block_ls):
+                self.add_module('pre_up_res_block{:d}'.format(i + 1), block)
+
+            # Double upsampling for 3 times
+            self.up_conv1 = nn.ConvTranspose2d(num_pre_up_channel, num_pre_up_channel // 2, 3, 2, 1, 1)
+            self.up_norm1 = nn.GroupNorm(min(num_pre_up_channel // 2, num_gn_channel), num_pre_up_channel // 2)
+            self.forward_conv1 = nn.Conv2d(num_pre_up_channel // 2, num_pre_up_channel // 2, 3, 1, 1)
+            self.forward_norm1 = nn.GroupNorm(min(num_pre_up_channel // 2, num_gn_channel), num_pre_up_channel // 2)
+
+            self.up_conv2 = nn.ConvTranspose2d(num_pre_up_channel // 2, num_pre_up_channel // 4, 3, 2, 1, 1)
+            self.up_norm2 = nn.GroupNorm(min(num_pre_up_channel // 4, num_gn_channel), num_pre_up_channel // 4)
+            self.forward_conv2 = nn.Conv2d(num_pre_up_channel // 4, num_pre_up_channel // 4, 3, 1, 1)
+            self.forward_norm2 = nn.GroupNorm(min(num_pre_up_channel // 4, num_gn_channel), num_pre_up_channel // 4)
+
+            self.up_conv3 = nn.ConvTranspose2d(num_pre_up_channel // 4, num_pre_up_channel // 8, 3, 2, 1, 1)
+            self.up_norm3 = nn.GroupNorm(min(num_pre_up_channel // 8, num_gn_channel), num_pre_up_channel // 8)
+            self.forward_conv3 = nn.Conv2d(num_pre_up_channel // 8, num_post_up_channel, 3, 1, 1)
+            self.forward_norm3 = nn.GroupNorm(min(num_post_up_channel, num_gn_channel), num_post_up_channel)
+
+            # Post-upsampling residual blocks
+            self.post_up_res_block_ls = [_create_res_block(tiny, num_gn_channel, ch_down_factor) for _ in range(dec_add_res_block)]
+            for i, block in enumerate(self.post_up_res_block_ls):
+                self.add_module('post_up_res_block{:d}'.format(i + 1), block)
+
+        self.fc1 = nn.Conv2d(num_post_up_channel, num_post_up_channel, 1, 1, 0)
+        self.fc1_norm = nn.GroupNorm(min(num_post_up_channel, num_gn_channel), num_post_up_channel)
+        self.fc2 = nn.Conv2d(num_post_up_channel, num_post_up_channel, 1, 1, 0)
+        self.fc2_norm = nn.GroupNorm(min(num_post_up_channel, num_gn_channel), num_post_up_channel)
 
         assert num_task_channel > 0 and num_pos_channel >= 0
         assert num_task_channel == len(mean)
-        if full_size_output:
-            # upsampling for semantics task
-            self.duc_upsample = DenseUpsamplingConvolution(down_sampling_rate=8, in_channel=(512, 128)[tiny],
-                                                           num_classes=num_task_channel+num_pos_channel)
-            self.fc3 = nn.Conv2d(num_task_channel+num_pos_channel, num_task_channel+num_pos_channel, 1, 1, 0)
-        else:
-            self.fc3 = nn.Conv2d((512, 128)[tiny], num_task_channel + num_pos_channel, 1, 1, 0)
+        self.fc3 = nn.Conv2d(num_post_up_channel, num_task_channel+num_pos_channel, 1, 1, 0)
 
     def forward(self, inputs, up_height=None, up_width=None):
         """
@@ -339,13 +356,26 @@ class TransPoseNetDecoder(nn.Module):
 
         res = F.relu(res + x)
 
+        # Upsampling
+        if self.full_size_output:
+            for i in range(len(self.pre_up_res_block_ls)):
+                x = self.pre_up_res_block_ls[i](res)
+                res = F.relu(res + x)
+
+            res = F.relu(self.up_norm1(self.up_conv1(res)))
+            res = F.relu(self.forward_norm1(self.forward_conv1(res)))
+            res = F.relu(self.up_norm2(self.up_conv2(res)))
+            res = F.relu(self.forward_norm2(self.forward_conv2(res)))
+            res = F.relu(self.up_norm3(self.up_conv3(res)))
+            res = F.interpolate(res, (up_height, up_width), mode='nearest')
+            res = F.relu(self.forward_norm3(self.forward_conv3(res)))
+
+            for i in range(len(self.post_up_res_block_ls)):
+                x = self.post_up_res_block_ls[i](res)
+                res = F.relu(res + x)
+
         sc = F.relu(self.fc1_norm(self.fc1(res)))
         sc = F.relu(self.fc2_norm(self.fc2(sc)))
-        if self.full_size_output:
-            # upsampling for semantics task
-            sc = self.duc_upsample(sc)  # [B, C, H', W']
-            sc = F.interpolate(sc, (up_height, up_width), mode='bilinear', align_corners=False)  # trim dimensions
-
         sc = self.fc3(sc)
 
         sc[:, :self.num_task_channel] += self.mean[None, :, None, None]  # sc = [B, C, H, W], excluding positive channel
@@ -373,8 +403,7 @@ class TransPoseNet(nn.Module):
     """
 
     def __init__(self, mean, tiny, grayscale, enc_add_res_block=0, dec_add_res_block=0,
-                 num_task_channel=3, num_pos_channel=1, num_gn_channel=32,
-                 num_mlr=0, num_unfrozen_encoder=0, full_size_output=False):
+                     num_task_channel=3, num_pos_channel=1, num_gn_channel=32, num_mlr=0, full_size_output=False):
         """
         Constructor.
         @param mean                 Mean offset for task output.
@@ -385,8 +414,7 @@ class TransPoseNet(nn.Module):
         @param num_task_channel     Number of channels for underlying task.
         @param num_pos_channel      Number of channels for additional task w/ positive values, e.g., uncertainty.
         @param num_gn_channel       Number of group normalization channels, a hyper-parameter.
-        @param num_mlr              Number of homogeneous mid-level representations encoders.
-        @param num_unfrozen_encoder Number of encoders that are not frozen.
+        @param num_mlr              Number of homogeneous mid-level representations to accept.
         @param full_size_output     Flag for full-size network output (by using DUC-style layers).
 
         Note: if enc_add_res_block == dec_add_res_block == 0 && num_task_channel == 3 && num_pos_channel = 0,
@@ -410,58 +438,48 @@ class TransPoseNet(nn.Module):
 
         self.OUTPUT_SUBSAMPLE = 1 if full_size_output else 8
 
-        """Vanilla encoder"""
-        if num_mlr == 0:
-            self.encoder = TransPoseNetEncoder(tiny, grayscale, enc_add_res_block, num_gn_channel)
-            self.encoder_ls = [self.encoder]
-        else:
-            self.encoder = nn.Identity()
-            self.encoder_ls = [self.encoder]
+        """Encoder"""
+        self.encoder = TransPoseNetEncoder(tiny, grayscale, enc_add_res_block, num_gn_channel)
+        self.encoder_ls = [self.encoder]
 
-        """MLR encoders"""
+        """MLR layer"""
         if num_mlr > 0 and isinstance(num_mlr, int):
-            assert 0 <= num_unfrozen_encoder <= num_mlr
             self.mlr_encoder_ls = [TransPoseNetEncoder(tiny, grayscale, enc_add_res_block, num_gn_channel) for _ in range(num_mlr)]
             # Freeze gradients of the re-used encoder
             for i, block in enumerate(self.mlr_encoder_ls):
-                if i >= num_unfrozen_encoder:  # the first few encoders **may** be reused for training
-                    for param in block.parameters():
-                        param.requires_grad = False
+                for param in block.parameters():
+                    param.requires_grad = False
                 self.add_module('mlr_encoder_{:d}'.format(i + 1), block)
-            self.mlr_norm = nn.GroupNorm(num_gn_channel, (512, 128)[tiny] * num_mlr)
+            self.mlr_norm = nn.GroupNorm(num_gn_channel, (512, 128)[tiny] * (num_mlr + 1))
             self.mlr_forward = _create_mlr_concatenator(num_mlr, tiny, num_gn_channel)
-            self.mlr_skip = _create_mlr_skip_layer(num_mlr, tiny, num_gn_channel)  # normalization is included
         else:
             self.mlr_encoder_ls = [nn.Identity()]
             self.mlr_norm = nn.Identity()
             self.mlr_forward = nn.Identity()
-            self.mlr_skip = nn.Identity()
-        self.mlr_ls = self.mlr_encoder_ls + [self.mlr_norm, self.mlr_forward, self.mlr_skip]
+        self.mlr_ls = self.mlr_encoder_ls + [self.mlr_norm, self.mlr_forward]
 
         """Decoder"""
-        # we always have a decoder regardless of the #MLR
         self.decoder = TransPoseNetDecoder(mean, tiny, dec_add_res_block,
                                            num_task_channel, num_pos_channel, num_gn_channel, full_size_output)
         self.decoder_ls = [self.decoder]
 
         """Print out"""
-        safe_printout('Initialized network w/ group normalization, Tiny net: {}, Grayscale input: {}, Fullsize output: {}.'.format(
+        _safe_printout('Initialized network w/ group normalization, Tiny net: {}, Grayscale input: {}, Fullsize output: {}.'.format(
             self.tiny, self.grayscale, self.full_size_output))
-        safe_printout('#Aadditional residual blocks: Encoder: {:d}, Decoder: {:d}'.format(
+        _safe_printout('#Aadditional residual blocks: Encoder: {:d}, Decoder: {:d}'.format(
             self.enc_add_res_block, self.dec_add_res_block))
-        safe_printout('#Task output channel {:d}, #Positive-value output channel {:d}, #Group normalization channel: {:d}.'.format(
+        _safe_printout('#Task output channel {:d}, #Positive-value output channel {:d}, #Group normalization channel: {:d}.'.format(
             self.num_task_channel, self.num_pos_channel, self.num_gn_channel))
-        safe_printout('#MLR: {:d}, #Unfrozen encoder: {:d}'.format(num_mlr, num_unfrozen_encoder))
 
         ttl_num_param = 0
         param_info = 'Separation of #trainable parameters: '
-        for name, struct in zip(['Vanilla encoder', 'MLR encoder', 'Decoder'],
+        for name, struct in zip(['Encoder', 'MLR layer', 'Decoder'],
                                 [self.encoder_ls, self.mlr_ls, self.decoder_ls]):
             num_param = sum([param.numel() for layer in struct for param in layer.parameters() if param.requires_grad])
             ttl_num_param += num_param
             param_info += '{:s}: {:,d}, '.format(name, num_param)
         param_info += 'Total: {:,d}.'.format(ttl_num_param)
-        safe_printout(param_info)
+        _safe_printout(param_info)
 
     def forward(self, inputs):
         """
@@ -473,22 +491,17 @@ class TransPoseNet(nn.Module):
         x = inputs
         up_height, up_width = inputs.size()[2:4]
 
-        """Vanilla encoder"""
-        if self.num_mlr == 0:
-            res = self.encoder(x)
-        else:
-            res = None
+        """Encoder"""
+        res = self.encoder(x)
 
-        """MLR encoder"""
+        """MLR layer"""
         if self.num_mlr:
             # inference
             mlr_activation_ls = [mlr_enc(inputs) for mlr_enc in self.mlr_encoder_ls]
+            mlr_activation = torch.cat(mlr_activation_ls, dim=1)  # [B, C', H, W]
 
             # activation concatenation
-            mlr = torch.cat(mlr_activation_ls, dim=1)  # [B, C * #MLR, H, W]
-
-            # forward
-            res = self.mlr_skip(mlr)
+            mlr = torch.cat([res, mlr_activation], dim=1)  # [B, C', H, W]
             mlr = self.mlr_norm(mlr)
             mlr = self.mlr_forward(mlr)
             res = F.relu(res + mlr)
@@ -522,11 +535,11 @@ class ProjHead(nn.Module):
         self.out_length = out_length
         self.num_gn_channel = num_gn_channel
 
-        safe_printout('Initialized projection head w/ group normalization, #Input channels: {:d}, Output feature vector length: {:d}, #Group normalization channel: {:d}.'.format(
+        _safe_printout('Initialized projection head w/ group normalization, #Input channels: {:d}, Output feature vector length: {:d}, #Group normalization channel: {:d}.'.format(
             self.in_channel, self.out_length, self.num_gn_channel))
 
         ttl_num_param = sum([param.numel() for param in self.parameters() if param.requires_grad])
-        safe_printout('Projection head total number of trainable parameters: {:,d}'.format(ttl_num_param))
+        _safe_printout('Projection head total number of trainable parameters: {:,d}'.format(ttl_num_param))
 
     def forward(self, inputs):
         """
